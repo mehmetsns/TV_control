@@ -1,4 +1,3 @@
-# TV_control
 
 #include "opencv2/objdetect.hpp"
 #include "opencv2/videoio.hpp"
@@ -16,60 +15,129 @@ using namespace cv;
 using namespace std;
 
 
+pair<double,int> find_ratio(Mat frame, Rect2d roi) {
+	
+	Mat output1, morph_operation;
+	Mat	frame_blur;
+	Mat frame_gray;
+	Mat hand_roi;
+	
+
+	int low_cb = 100;
+	int high_cb = 127;
+	int low_cr = 135;
+	int high_cr = 175;
+	int count = 1;
+	
+	hand_roi = frame(roi);
+	
+	Mat kernel = Mat(5, 5, CV_8UC1, 255);
+	GaussianBlur(hand_roi, frame_blur, Size(5, 5), 0);
+	Mat frame_threshold(frame_blur.rows, frame_blur.cols, CV_8UC1, Scalar(0));
+
+	cvtColor(frame_blur, output1, CV_BGR2YCrCb);
+    
+	//threshold
+	inRange(output1, Scalar(0, low_cr, low_cb), Scalar(255, high_cr, high_cb), frame_threshold);
+	
+	//morpholocigal operations
+	erode(frame_threshold, morph_operation, Mat(3, 3, CV_8UC1, 255), Point(-1, -1), 3, 0);
+	dilate(morph_operation, morph_operation, Mat(3, 3, CV_8UC1, 255), Point(-1, -1), 1, 0);
+
+	int max = -1;
+	int min = -1;
+	//find height
+	for (int i = 0; i < morph_operation.rows && min == -1; i++)
+		for (int j = 0; j < morph_operation.cols; j++)
+			if (morph_operation.at<uchar>(i, j) == 255)
+				min = i;
+
+
+
+	for (int i = morph_operation.rows - 1; max == -1 && i >= 0; i--)
+		for (int j = 0; j < morph_operation.cols; j++)
+			if (morph_operation.at<uchar>(i, j) == 255)
+				max = i;
+
+
+	int height = max - min;
+
+
+	// find weight
+	int width = 0;
+	for (int j = 0; j < morph_operation.cols; j++)
+		if (morph_operation.at<uchar>(morph_operation.rows / 2, j) == 255)
+			width++;
+
+	cout << height << "   " << width << "   " << double(height) / width << endl;
+
+
+
+	return pair<double, int>(double(height) / width,height);
+
+}
+
+
+
+
+
+
+
 
 void main()
 {
 	/*VideoCapture kamera("C:\\Users\\memoc\\Desktop\\2.mp4");*/
 	VideoCapture kamera(0);
-	
+
 	Mat frame;
 	Mat frame_gray;
-	Mat right_frame_gray;
+	Mat	right_frame_gray;
 	Mat right_frame;
-	Mat fist_frame, fist_frame_gray;
+	Mat palm_frame, palm_frame_gray;
 	Mat dst;
 	Mat close;
 	Mat	open;
-	
-	std::vector<Rect> faces,fists,hands,fist_in_roi;
+
+	std::vector<Rect> faces, palms, fists, palm_in_roi;
 	Rect roi;
-	
+
 	/*CascadeClassifier */
-	CascadeClassifier face_cascade,fist_cascade,hand_cascade;
+	CascadeClassifier face_cascade, palm_cascade, fist_cascade;
 	face_cascade.load("haarcascade_frontalface_default.xml");
-	hand_cascade.load("HandDetectorHaar.xml");
-	fist_cascade.load("yumruk_1615(0.5_20).xml");
+	palm_cascade.load("palmdetector17st05err.xml");
+	fist_cascade.load("palmdetector17st05err.xml");
 
 	int frame_delay = 1;
 
-	// create a tracker object
-	Ptr<TrackerKCF> tracker = TrackerKCF::createTracker();
+	
+		// create a tracker object
+	Ptr<TrackerKCF> tracker = TrackerKCF::create();
 	//close = imread("C:\\Users\\memoc\\Desktop\\close.jpg");
 	//imshow("TV", close);
 	/*kamera.read(dst);
 	Rect2d r = selectROI("ROI", dst, true, false);*/
-	
-	namedWindow("yumruk", WINDOW_NORMAL); 
+
+	namedWindow("yumruk", WINDOW_NORMAL);
 	namedWindow("face", WINDOW_NORMAL);
 
 	while (true) {
 		kamera.read(frame);
-		
-		
+
+
 
 		//frame_delay++;
 		/*string x = to_string(i);
 		frame = imread("C:\\Users\\memoc\\Desktop\\yumruk_deneme\\y (" + x + ")" + ".jpg");*/
-		
-		
+
+
 		/*Mat frame = dst(r);*/
-		resize(frame, frame, Size(320,240));
+		resize(frame, frame, Size(320, 240));
 		cvtColor(frame, frame_gray, COLOR_BGR2GRAY);
-		// equalizeHist(frame_gray, frame_gray);
-		
-		 
+		 equalizeHist(frame_gray, frame_gray);
+
+
 		// detect face if there is no fist detection
-		if( fists.size()==0 ){
+		if (palms.size() == 0) {
 			face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(20, 30), Size(350, 450));
 			//face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(50, 100), Size(350, 450));
 			while (faces.size() == 0) {
@@ -79,110 +147,141 @@ void main()
 				face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(30, 30), Size(350, 450));
 				imshow("face", frame);
 				waitKey(33);
-				
+
 			}
 		}
-			kamera >> frame;
-			// detect first face that appear, ignore others
-			if (faces.size() > 0) {
-				rectangle(frame, Point(faces[0].x*2, faces[0].y*2), Point((faces[0].x + faces[0].width)*2, (faces[0].y + faces[0].height)*2), (0, 0, 255), 2);
-				//determine ROI respect to face region , ROI is right of the face region
-				roi = Rect(Point(0, 0), Point((faces[0].x + faces[0].width / 2)*2, frame.rows - 2));
-			}
+		kamera >> frame;
+		// detect first face that appear, ignore others
 		
+		rectangle(frame, Point(faces[0].x * 2, faces[0].y * 2), Point((faces[0].x + faces[0].width) * 2, (faces[0].y + faces[0].height) * 2), (0, 0, 255), 2);
+		//determine ROI respect to face region , ROI is right of the face region
+		roi = Rect(Point(0, 0), Point((faces[0].x + faces[0].width / 2) * 2, frame.rows - 2));
 		
-		//draw the ROI
-		if(faces.size() != 0)
-			rectangle(frame, Point((faces[0].x+faces[0].width/2)*2, 0), Point(0 ,frame.cols-4 ), Scalar(0, 0, 255), 4);
 
-		
-		right_frame= frame(roi);
-		
+
+		//draw the ROI
+		rectangle(frame, Point((faces[0].x + faces[0].width / 2) * 2, 0), Point(0, frame.cols - 4), Scalar(0, 0, 255), 4);
+		right_frame = frame(roi);
+
 		cvtColor(right_frame, right_frame_gray, COLOR_BGR2GRAY);
 		equalizeHist(right_frame_gray, right_frame_gray);
 
-		//hand_cascade.detectMultiScale(frame_gray2, hands, 1.1, 20, 0, Size(30, 30));
 
-		/*
-		for (size_t i = 0; i < hands.size(); i++)
-		{
+		palm_cascade.detectMultiScale(right_frame_gray, palms, 1.1, 20, 0, Size(30, 30), Size(250, 250));
+		
 
-			Point center(hands[i].x + hands[i].width / 2, hands[i].y + hands[i].height / 2);
-			ellipse(right_frame, center, Size(hands[i].width / 2, hands[i].height / 2), 0, 0, 360, Scalar(255, 0, 255), 4, 8, 0);
-		} */
 
-		fist_cascade.detectMultiScale(right_frame_gray, fists, 1.1, 5, 0, Size(30,30),Size(250,250));
 
-		if (fists.size() != 0)
-			rectangle(frame, Point(fists[0].x, fists[0].y), Point(fists[0].x + fists[0].width, fists[0].y + fists[0].height), (0, 0, 255), 4,1);
 
-		if (fists.size() != 0) {
-			Rect2d fist_roi = Rect2d(fists[0]);
-			tracker->init(frame, fist_roi);
-			int fist_delay = 0;
+		//draw palm
+		/*if (palms.size() != 0)
+			rectangle(frame, Point(palms[0].x, palms[0].y), Point(palms[0].x + palms[0].width, palms[0].y + palms[0].height), (0, 0, 255), 4, 1);*/
+
+		if (palms.size() != 0) {
+			Rect2d palm_roi = Rect2d(palms[0]);
+			
+			pair<double,int> myPair = find_ratio(frame, palm_roi);
+			double initial_ratio = myPair.first;
+			int initial_height = myPair.second;
+
+			tracker->init(frame, palm_roi);
+			int palm_delay = 0;
 			while (true) {
 				kamera >> frame;
-				bool check = tracker->update(frame, fist_roi);
+				bool check = tracker->update(frame, palm_roi);
+
+				if (!check) {
+					tracker.release();
+					tracker = cv::TrackerKCF::create();
+						break;
+				}
 				
-				if (!check)
-					break;
+				rectangle(frame, palm_roi, Scalar(255, 255, 255), 2, 1);
+
 				
-				rectangle(frame, fist_roi, Scalar(255, 255, 255), 2, 1); 
 				imshow("face", frame);
 				waitKey(33);
-				fist_delay++;
-				
-				if (fist_delay > 10 ) {
-					bool is_inside = (Rect(fist_roi) & cv::Rect(0, 0, frame.cols, frame.rows)) == Rect(fist_roi);
+				palm_delay++;
+
+				if (palm_delay > 3) {
+					
+					
+					
+					bool is_inside = (Rect(palm_roi) & cv::Rect(0, 0, frame.cols, frame.rows)) == Rect(palm_roi);
 					if (!is_inside)
 						break;
 
-					fist_frame = frame(fist_roi);
-					cvtColor(fist_frame,fist_frame_gray , COLOR_BGR2GRAY);
-					equalizeHist(fist_frame_gray, fist_frame_gray);
+					palm_frame = frame(palm_roi);
+					cvtColor(palm_frame, palm_frame_gray, COLOR_BGR2GRAY);
+					equalizeHist(palm_frame_gray, palm_frame_gray);
+
 					
-					fist_cascade.detectMultiScale(fist_frame_gray, fist_in_roi, 1.1, 5, 0, Size(30, 30));
-					fist_delay = 0;
-					if (fist_in_roi.size() == 0) {
+					palm_cascade.detectMultiScale(palm_frame_gray, palm_in_roi, 1.1, 5, 0, Size(30, 30));
+					
+
+					palm_delay = 0;
+					if (palm_in_roi.size() == 0) {
 						tracker.release();
-						tracker = cv::TrackerKCF::createTracker();
+						tracker = cv::TrackerKCF::create();
 						break;
 					}
 				}
+
+			} // end tracker
+
+
+			while (true) {
+				kamera >> frame;
+				myPair = find_ratio(frame, palm_roi);
+				int current_height = myPair.second;
+				
+				if (current_height < round(initial_height * 0.9))
+					break;
+				
+				double current_ratio = myPair.first;
+
+				if (current_ratio / initial_ratio >= 3.00) {
+					cout << "Channel UP!!!!!!!!!!!!!!!!!!" << endl;
+					break;
+				}
+				waitKey(33);
+				imshow("face", frame);
 				
 			}
+					
+
 		}
 		/*if (hands.size() == 1) {
 
-			int j = 0;
-				while (j < 3) {
-					close = imread("C:\\Users\\memoc\\Desktop\\close.jpg");
-					
-					putText(close, "TV is Opening", Point(300, 400), 1, 2, Scalar(0, 255, 0), 1);
-					putText(close, "               .", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
-					imshow("TV", close);
-					waitKey(1000);
+		int j = 0;
+		while (j < 3) {
+		close = imread("C:\\Users\\memoc\\Desktop\\close.jpg");
 
-					putText(close, "               ..", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
-					imshow("TV", close);
-					waitKey(1000);
+		putText(close, "TV is Opening", Point(300, 400), 1, 2, Scalar(0, 255, 0), 1);
+		putText(close, "               .", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
+		imshow("TV", close);
+		waitKey(1000);
 
-					putText(close, "               ...", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
-					imshow("TV",close);
-					waitKey(1000);
-					j++;
-				}
-				close = imread("C:\\Users\\memoc\\Desktop\\open.jpg");
-				imshow("TV", close);
+		putText(close, "               ..", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
+		imshow("TV", close);
+		waitKey(1000);
+
+		putText(close, "               ...", Point(300, 400), 1, 2, Scalar(0, 255, 0), 3);
+		imshow("TV",close);
+		waitKey(1000);
+		j++;
 		}
-*/
+		close = imread("C:\\Users\\memoc\\Desktop\\open.jpg");
+		imshow("TV", close);
+		}
+		*/
 
 		imshow("face", frame);
 		imshow("yumruk", right_frame);
-	
+
 		if (waitKey(25) == int('k'))
 			return;
-		
+
 	}
 }
 
