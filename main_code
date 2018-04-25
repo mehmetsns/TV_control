@@ -1,4 +1,5 @@
 
+
 #include "opencv2/objdetect.hpp"
 #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
@@ -15,31 +16,33 @@ using namespace cv;
 using namespace std;
 
 
-pair<double,int> find_ratio(Mat frame, Rect2d roi) {
-	
+pair<double, int> find_ratio(Mat frame, Rect2d roi) {
+
 	Mat output1, morph_operation;
 	Mat	frame_blur;
 	Mat frame_gray;
 	Mat hand_roi;
-	
+
 
 	int low_cb = 100;
 	int high_cb = 127;
 	int low_cr = 135;
 	int high_cr = 175;
 	int count = 1;
-	
+
+	// get hand roi
 	hand_roi = frame(roi);
-	
+
 	Mat kernel = Mat(5, 5, CV_8UC1, 255);
 	GaussianBlur(hand_roi, frame_blur, Size(5, 5), 0);
 	Mat frame_threshold(frame_blur.rows, frame_blur.cols, CV_8UC1, Scalar(0));
 
+	//convert RGB to YCrCb
 	cvtColor(frame_blur, output1, CV_BGR2YCrCb);
-    
+
 	//threshold
 	inRange(output1, Scalar(0, low_cr, low_cb), Scalar(255, high_cr, high_cb), frame_threshold);
-	
+
 	//morpholocigal operations
 	erode(frame_threshold, morph_operation, Mat(3, 3, CV_8UC1, 255), Point(-1, -1), 3, 0);
 	dilate(morph_operation, morph_operation, Mat(3, 3, CV_8UC1, 255), Point(-1, -1), 1, 0);
@@ -73,7 +76,21 @@ pair<double,int> find_ratio(Mat frame, Rect2d roi) {
 
 
 
-	return pair<double, int>(double(height) / width,height);
+	return pair<double, int>(double(height) / width, height);
+
+}
+
+
+Rect increase_roi(Rect roi, double ratio) {
+
+	Rect new_roi;
+	new_roi.height = 2 * (roi.height*ratio - roi.height) + roi.height;
+	new_roi.y = roi.y - (roi.height*ratio - roi.height);
+	new_roi.x = roi.x- (roi.width*ratio - roi.width);
+	new_roi.width = 2*(roi.width*ratio-roi.width)+roi.width;
+	
+	return new_roi;
+
 
 }
 
@@ -99,7 +116,7 @@ void main()
 	Mat	open;
 
 	std::vector<Rect> faces, palms, fists, palm_in_roi;
-	Rect roi;
+	Rect roi , palm_detector_roi;
 
 	/*CascadeClassifier */
 	CascadeClassifier face_cascade, palm_cascade, fist_cascade;
@@ -109,9 +126,9 @@ void main()
 
 	int frame_delay = 1;
 
-	
-		// create a tracker object
-	Ptr<TrackerKCF> tracker = TrackerKCF::create();
+
+	// create a tracker object
+	Ptr<TrackerKCF> tracker = TrackerKCF::createTracker();
 	//close = imread("C:\\Users\\memoc\\Desktop\\close.jpg");
 	//imshow("TV", close);
 	/*kamera.read(dst);
@@ -133,12 +150,12 @@ void main()
 		/*Mat frame = dst(r);*/
 		resize(frame, frame, Size(320, 240));
 		cvtColor(frame, frame_gray, COLOR_BGR2GRAY);
-		 equalizeHist(frame_gray, frame_gray);
+		equalizeHist(frame_gray, frame_gray);
 
 
 		// detect face if there is no fist detection
 		if (palms.size() == 0) {
-			face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(20, 30), Size(350, 450));
+			face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(20, 30), Size(450, 450));
 			//face_cascade.detectMultiScale(frame_gray, faces, 1.1, 10, 0, Size(50, 100), Size(350, 450));
 			while (faces.size() == 0) {
 				kamera >> frame;
@@ -152,11 +169,11 @@ void main()
 		}
 		kamera >> frame;
 		// detect first face that appear, ignore others
-		
+
 		rectangle(frame, Point(faces[0].x * 2, faces[0].y * 2), Point((faces[0].x + faces[0].width) * 2, (faces[0].y + faces[0].height) * 2), (0, 0, 255), 2);
 		//determine ROI respect to face region , ROI is right of the face region
 		roi = Rect(Point(0, 0), Point((faces[0].x + faces[0].width / 2) * 2, frame.rows - 2));
-		
+
 
 
 		//draw the ROI
@@ -167,88 +184,91 @@ void main()
 		equalizeHist(right_frame_gray, right_frame_gray);
 
 
-		palm_cascade.detectMultiScale(right_frame_gray, palms, 1.1, 20, 0, Size(30, 30), Size(250, 250));
-		
-
-
+		palm_cascade.detectMultiScale(right_frame_gray, palms, 1.1, 20, 0, Size(50, 50), Size(300, 300));
 
 
 		//draw palm
 		/*if (palms.size() != 0)
-			rectangle(frame, Point(palms[0].x, palms[0].y), Point(palms[0].x + palms[0].width, palms[0].y + palms[0].height), (0, 0, 255), 4, 1);*/
+		rectangle(frame, Point(palms[0].x, palms[0].y), Point(palms[0].x + palms[0].width, palms[0].y + palms[0].height), (0, 0, 255), 4, 1);*/
 
 		if (palms.size() != 0) {
-			Rect2d palm_roi = Rect2d(palms[0]);
 			
-			pair<double,int> myPair = find_ratio(frame, palm_roi);
+			Rect2d palm_tracker_roi = Rect2d(palms[0]);
+			
+
+
+			pair<double, int> myPair = find_ratio(frame, palm_tracker_roi);
 			double initial_ratio = myPair.first;
 			int initial_height = myPair.second;
 
-			tracker->init(frame, palm_roi);
+			tracker->init(frame, palm_tracker_roi);
 			int palm_delay = 0;
+
+			bool is_inside;
 			while (true) {
 				kamera >> frame;
-				bool check = tracker->update(frame, palm_roi);
+				bool check = tracker->update(frame, palm_tracker_roi);
 
 				if (!check) {
 					tracker.release();
-					tracker = cv::TrackerKCF::create();
-						break;
+					tracker = cv::TrackerKCF::createTracker();
+					break;
 				}
-				
-				rectangle(frame, palm_roi, Scalar(255, 255, 255), 2, 1);
 
-				
+				rectangle(frame, palm_tracker_roi, Scalar(255, 255, 255), 2, 1);
+
+
 				imshow("face", frame);
 				waitKey(33);
 				palm_delay++;
 
-				if (palm_delay > 3) {
-					
-					
-					
-					bool is_inside = (Rect(palm_roi) & cv::Rect(0, 0, frame.cols, frame.rows)) == Rect(palm_roi);
+				if (palm_delay > 5) {
+
+					//increase trackker_roi to check the hand is inside the roi
+					palm_detector_roi = increase_roi(Rect(palm_tracker_roi), 1.25);
+					is_inside = (Rect(palm_detector_roi) & cv::Rect(0, 0, frame.cols, frame.rows)) == Rect(palm_detector_roi);
 					if (!is_inside)
 						break;
 
-					palm_frame = frame(palm_roi);
+					
+					palm_frame = frame(palm_detector_roi);
 					cvtColor(palm_frame, palm_frame_gray, COLOR_BGR2GRAY);
 					equalizeHist(palm_frame_gray, palm_frame_gray);
 
-					
-					palm_cascade.detectMultiScale(palm_frame_gray, palm_in_roi, 1.1, 5, 0, Size(30, 30));
-					
+
+					palm_cascade.detectMultiScale(palm_frame_gray, palm_in_roi, 1.1, 2, 0, Size(30, 30));
+
 
 					palm_delay = 0;
 					if (palm_in_roi.size() == 0) {
 						tracker.release();
-						tracker = cv::TrackerKCF::create();
+						tracker = cv::TrackerKCF::createTracker();
 						break;
 					}
 				}
 
 			} // end tracker
 
-
-			while (true) {
+			
+			while (true && is_inside) {
 				kamera >> frame;
-				myPair = find_ratio(frame, palm_roi);
+				myPair = find_ratio(frame, palm_tracker_roi);
 				int current_height = myPair.second;
-				
+
 				if (current_height < round(initial_height * 0.9))
 					break;
-				
+
 				double current_ratio = myPair.first;
 
-				if (current_ratio / initial_ratio >= 3.00) {
+				if (current_ratio / initial_ratio >= 2.00) {
 					cout << "Channel UP!!!!!!!!!!!!!!!!!!" << endl;
 					break;
 				}
 				waitKey(33);
 				imshow("face", frame);
-				
+
 			}
-					
+
 
 		}
 		/*if (hands.size() == 1) {
